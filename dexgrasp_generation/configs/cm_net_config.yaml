@@ -10,7 +10,7 @@ use_DFCData: True
 use_Shadow: True
 
 # dirs
-exp_dir: ./runs/exp_cm
+exp_dir: ./runs/exp_joint_train/cm_net_train_batch128
 
 # wandb
 wandb_offline: True
