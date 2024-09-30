@@ -15,7 +15,8 @@ models:
 tta:
     contact_net:
         type: cm_net
-    batch_size: 50
+#    batch_size: 50
+    batch_size: 10
     iterations: 300
     lr: 0.001
     normalize_factor: 60

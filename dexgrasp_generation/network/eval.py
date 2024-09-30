@@ -56,6 +56,7 @@ def main(cfg):
             net_cfg['device'] = cfg['device']
         trainer = Trainer(net_cfg, logger)
         trainer.resume()
+        # print(trainer.model.net.backbone.backbone.lin1.weight)
         trainers.append(trainer)
 
     contact_cfg = compose(f"{cfg['tta']['contact_net']['type']}_config")
@@ -88,6 +89,13 @@ def main(cfg):
         result = []
         for _, data in enumerate(tqdm(loader)):
             for i in range(cfg['models'][key]['sample_num']):
+                # for k, v in data.items():
+                #     print(k)
+                #     if type(v) == torch.Tensor:
+                #         print(v.shape)
+                #     else:
+                #         print(v)
+
                 pred_dict, _ = trainer.test(data)
                 data.update(pred_dict)
                 result.append({k: v.cpu() if type(v) == torch.Tensor else v for k, v in data.items()})
@@ -137,6 +145,11 @@ def main(cfg):
     output_result(seen_result, 'seen')
     output_result(unseen_result, 'unseen')
 
+    s_root = "/home/pxn-lyj/Egolee/programs/UniDexGrasp_liyj/dexgrasp_generation/eval"
+    pt_path = s_root + '/result.pt'
+    torch.save(result, pt_path)
+    print(pt_path)
+
 
 def divide(data):
     seen_data = []
@@ -173,12 +186,25 @@ def output_result(data, name):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config-name", type=str, default="eval_config")
+    # parser.add_argument("--config-name", type=str, default="glow_joint_config")
     parser.add_argument("--exp-dir", type=str, help="E.g., './eval_result'.")
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
+
+    # torch.manual_seed(233)
+    # 推理过程的存在随机变量，导致每次推理的结果都不一样
+    os.environ['SMALL_OBJECT_LIST'] = "true"  # 加载数据时少量数据，加载时间过长  object_dataset.py
+    # os.environ['RANDOM_POSE'] = "false"     # 加载数据时随机pose   object_dataset.py
+    os.environ['TABLE_PC_EXTRA'] = "false"  # 对table进行额外的扰动   object_dataset.py
+    os.environ['SAModule_RANDOM_START'] = "false"  # fps时是否随机选择第一个点   pointnetpp_encoder.py
+    os.environ['IPDF_UNIFORM_SAMPLE'] = "false"     # ipdf 是否进行均匀采样   ipdf_network.py
+
+    # flow模型在glow_network.py 还存在一个随机采样的步骤，目前不太好处理，主要影响平移和关节角度
+    # self.flow.sample_and_log_prob(self.sample_num, feat)
+
     initialize(version_base=None, config_path="../configs", job_name="train")
     if args.exp_dir is None:
         cfg = compose(config_name=args.config_name)
