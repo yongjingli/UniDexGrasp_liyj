@@ -153,6 +153,8 @@ class IPDFFullNet(nn.Module):
         return sampled_rotations
 
     def sample_rotations(self, inputs, sample_times=None):
+       # print("self.backbone.backbone.lin1.weight:", self.backbone.backbone.lin1.weight)
+
         """
         :return: [B, 3, 3]
         """

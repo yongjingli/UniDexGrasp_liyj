@@ -1,16 +1,16 @@
 defaults:
     - _self_
-    - model: ipdf
-    - dataset: ipdf_data
+    - model: cm_net
+    - dataset: cm_net_data
     - override hydra/hydra_logging: none
     - override hydra/job_logging: none
 
-network_type: ipdf
+network_type: cm_net
 use_DFCData: True
 use_Shadow: True
 
 # dirs
-exp_dir: ./runs/exp_joint_train/ipdf_train_batch128
+exp_dir: ./runs/exp_cm
 
 # wandb
 wandb_offline: True
@@ -21,7 +21,7 @@ freq:
     step_epoch: 100
     save: 10000  # per iter
     plot: 100  # per iter
-    test: 75000 # per iter
+    test: 50000 # per iter
 
 # optimization options
 optimizer: Adam
@@ -47,8 +47,8 @@ resume_epoch: -1
 cuda_id: 0
 
 # data loader
-num_workers: 16
-batch_size: 16
+num_workers: 64
+batch_size: 128
 
 # hydra
 hydra:

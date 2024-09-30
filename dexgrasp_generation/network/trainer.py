@@ -90,14 +90,20 @@ class Trainer(nn.Module):
 
         self.optimizer = get_optimizer([p for p in self.model.parameters() if p.requires_grad], cfg)
         self.scheduler = get_scheduler(self.optimizer, cfg)
+               
+        if 'joint_training' in cfg['model']:
+            if not cfg['model']['joint_training']:
+                self.apply(weights_init(cfg['weight_init']))
+        else:
+            self.apply(weights_init(cfg['weight_init']))
 
-        self.apply(weights_init(cfg['weight_init']))
 
         self.epoch = 1
         self.iteration = 0
         self.loss_dict = {}
 
         self.logger = logger
+        #print("init self.model.rotation_net.backbone.backbone.lin1.weight:", self.model.rotation_net.backbone.backbone.lin1.weight)
 
     def log_string(self, out_str):
         self.logger.info(out_str)
@@ -161,7 +167,8 @@ class Trainer(nn.Module):
                         nnew_ckpt[name[4:]] = new_ckpt[name]
                     self.model.net.load_state_dict(nnew_ckpt)
 
-        print(self.model)
+        #print(self.model)
+        #print("resume self.model.rotation_net.backbone.backbone.lin1.weight:", self.model.rotation_net.backbone.backbone.lin1.weight)
 
         return self.epoch
 

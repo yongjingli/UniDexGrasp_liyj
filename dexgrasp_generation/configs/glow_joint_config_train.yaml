@@ -1,16 +1,16 @@
 defaults:
     - _self_
-    - model: ipdf
-    - dataset: ipdf_data
+    - model: glow_joint
+    - dataset: glow_data
     - override hydra/hydra_logging: none
     - override hydra/job_logging: none
 
-network_type: ipdf
+network_type: glow
 use_DFCData: True
 use_Shadow: True
 
 # dirs
-exp_dir: ./runs/exp_joint_train/ipdf_train_batch128
+exp_dir: ./runs/exp_joint_train/glow_train_batch128
 
 # wandb
 wandb_offline: True
@@ -20,8 +20,9 @@ wandb_debug_mode: True  # and only program error will be reported
 freq:
     step_epoch: 100
     save: 10000  # per iter
+    #save: 10  # per iter
     plot: 100  # per iter
-    test: 75000 # per iter
+    test: 50000 # per iter
 
 # optimization options
 optimizer: Adam
@@ -40,7 +41,7 @@ momentum_min: 0.01
 
 # training options
 weight_init: xavier
-total_epoch: 250
+total_epoch: 20000
 resume_epoch: -1
 
 # device
@@ -48,7 +49,7 @@ cuda_id: 0
 
 # data loader
 num_workers: 16
-batch_size: 16
+batch_size: 24
 
 # hydra
 hydra:
