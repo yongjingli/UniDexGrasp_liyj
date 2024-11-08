@@ -33,6 +33,8 @@ from datasets.shadow_hand_builder import ShadowHandBuilder
 import time
 from tqdm import tqdm
 
+from utils_data import save_2_ply
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -151,7 +153,7 @@ class DFCDatasetDebug(DFCDataset):
             hand_rotation_mat = torch.eye(3)
             hand_translation = torch.einsum('a,ab->b', global_translation, global_rotation_mat)
 
-            print(hand_rotation_mat, hand_translation, qpos)
+            # print(hand_rotation_mat, hand_translation, qpos)
             gt_hand_mesh = self.hand_builder.get_hand_mesh(hand_rotation_mat,
                                                              hand_translation,
                                                                  qpos=qpos)
@@ -215,12 +217,36 @@ class DFCDatasetDebug(DFCDataset):
 
 def main(cfg):
     cfg = process_config(cfg)
+    s_root = "/home/pxn-lyj/Egolee/programs/UniDexGrasp_liyj/dexgrasp_generation/local_files/data/tmp"
     # train_loader = get_dex_dataloader(cfg, "train")
     # dataset = DFCDataset(cfg, "train")
     dataset = DFCDatasetDebug(cfg, "train")
     for data in tqdm(dataset, desc="dataset"):
+
+        # cm-net
+        canon_obj_pc = data["canon_obj_pc"]
+        gt_hand_pc = data["gt_hand_pc"]
+        contact_map = data["contact_map"]
+        gt_hand_pc = data["gt_hand_pc"]
+        observed_hand_pc = data["observed_hand_pc"]
+
+        canon_obj_pc = canon_obj_pc.detach().cpu().numpy()
+        gt_hand_pc = gt_hand_pc.detach().cpu().numpy()
+        contact_map = contact_map.detach().cpu().numpy()
+        observed_hand_pc = observed_hand_pc.detach().cpu().numpy()
+
+        s_canon_obj_pc_path = os.path.join(s_root, "canon_obj_pc.ply")
+        s_gt_hand_pc_path = os.path.join(s_root, "gt_hand_pc.ply")
+        s_contact_map_path = os.path.join(s_root, "contact_map.ply")
+        s_observed_hand_pc_path = os.path.join(s_root, "observed_hand_pc.ply")
+
+        save_2_ply(s_canon_obj_pc_path, canon_obj_pc[:, 0], canon_obj_pc[:, 1], canon_obj_pc[:, 2], color=None)
+        save_2_ply(s_gt_hand_pc_path, gt_hand_pc[:, 0], gt_hand_pc[:, 1], gt_hand_pc[:, 2], color=None)
+        save_2_ply(s_observed_hand_pc_path, observed_hand_pc[:, 0], observed_hand_pc[:, 1], observed_hand_pc[:, 2], color=None)
+
         a = "fff"
-        # print("fff")
+        print("fff")
+        exit(1)
 
 
 def show_pt():
@@ -249,7 +275,6 @@ def show_pt():
     plt.plot(np.arange(len(pts2)), pts2)
     plt.show()
     print(np.argmax(pts0), pts0[np.argmax(pts0)])
-
 
 
 if __name__ == "__main__":

@@ -1,7 +1,10 @@
 import os
-import shutil
-
 os.chdir('../')
+
+import cv2
+import pytorch3d.ops
+
+import shutil
 import numpy as np
 import logging
 import torch
@@ -20,6 +23,160 @@ from network.models.contactnet.contact_network import ContactMapNet
 from network.models.model import get_model
 from utils_data import get_mesh_data_object_list, get_object_data, format_batch_data
 from utils.hand_model import AdditionalLoss, add_rotation_to_hand_pose
+from utils_data import save_2_ply
+
+
+def image_and_depth_to_point_cloud(image, depth, fx, fy, cx, cy, max_depth=5.0):
+    rows, cols = depth.shape
+    u, v = np.meshgrid(range(cols), range(rows))
+    z = depth
+    # 将深度为 0 或小于等于某个极小值的点标记为无效
+    invalid_mask = np.bitwise_or(np.bitwise_or(z <= 0, z < np.finfo(np.float32).eps), z > max_depth)
+    x = np.where(~invalid_mask, (u - cx) * z / fx, 0)
+    y = np.where(~invalid_mask, (v - cy) * z / fy, 0)
+    # z = z[~invalid_mask]
+    points = np.stack([x, y, z], axis=-1).reshape(-1, 3)
+    colors = image.reshape(-1, 3)
+
+    points = points[~invalid_mask.reshape(-1)]
+    colors = colors[~invalid_mask.reshape(-1)]
+
+    return points, colors
+
+
+def get_object_surroud_points(scene_points, object_points, x_expand=0.05,
+                              y_expand=0.05, z_expand=0.05):
+
+    object_min_x = np.min(object_points[:, 0])
+    object_max_x = np.max(object_points[:, 0])
+    object_min_y = np.min(object_points[:, 1])
+    object_max_y = np.max(object_points[:, 1])
+    object_min_z = np.min(object_points[:, 2])
+    object_max_z = np.max(object_points[:, 2])
+
+    object_center_x = (object_min_x + object_max_x)/2
+    object_center_y = (object_min_y + object_max_y)/2
+    object_center_z = (object_min_z + object_max_z)/2
+    # object_center = (object_center_x, object_center_y, object_center_z)
+    object_center = (np.mean(object_points[:, 0]), np.mean(object_points[:, 1]), np.mean(object_points[:, 2]))
+
+    x_mask = np.bitwise_and(scene_points[:, 0] > (object_min_x - x_expand),
+                            scene_points[:, 0] < (object_max_x + x_expand))
+
+    y_mask = np.bitwise_and(scene_points[:, 1] > (object_min_y - y_expand),
+                            scene_points[:, 1] < (object_max_y + y_expand))
+
+    z_mask = np.bitwise_and(scene_points[:, 2] > (object_min_z - z_expand),
+                            scene_points[:, 2] < (object_max_z + z_expand))
+
+    object_surroud_mask = np.bitwise_and(np.bitwise_and(x_mask, y_mask), z_mask)
+    object_surroud_pts = scene_points[object_surroud_mask]
+    return object_center, object_surroud_pts
+
+
+def fps_pytorch_3d(pts, pt_num=1000):
+    pts = torch.from_numpy(pts)
+    pts_sampled = pytorch3d.ops.sample_farthest_points(pts.unsqueeze(0), K=pt_num)[0][0]
+    # pts_sampled = pts_sampled.detach().cpu().numpy()
+    return pts_sampled
+
+
+def get_unidexgrasp_input(root, img_name, cam_k):
+    s_root = "/home/pxn-lyj/Egolee/programs/UniDexGrasp_liyj/dexgrasp_generation/local_files/data/tmp"
+    # if os.path.exists(s_root):
+    #     shutil.rmtree(s_root)
+    # os.mkdir(s_root)
+
+    img_root = os.path.join(root, "colors")
+    # pose_root = os.path.join(root, "poses")
+    mask_root = os.path.join(root, "masks_num")
+    depth_root = os.path.join(root, "depths")
+
+    img_path = os.path.join(img_root, img_name)
+    mask_path = os.path.join(mask_root, img_name.replace("_color.jpg", "_mask.npy"))
+    depth_path = os.path.join(depth_root, img_name.replace("_color.jpg", "_depth.npy"))
+
+    img = cv2.imread(img_path)
+    depth = np.load(depth_path)
+
+    mask = np.load(mask_path)
+
+    # kernel = np.ones((5, 5), np.uint8)
+    # mask = cv2.erode(mask.astype(np.uint8), kernel)
+
+    object_depth = np.zeros_like(depth)
+    bg_depth = np.zeros_like(depth)
+
+    object_depth[mask] = depth[mask]
+    bg_depth[~mask] = depth[~mask]
+
+    object_pts, obj_colors = image_and_depth_to_point_cloud(img, object_depth, fx=cam_k[0, 0], fy=cam_k[1, 1],
+                                                            cx=cam_k[0, 2], cy=cam_k[1, 2], max_depth=5.0)
+
+    bg_pts, bg_colors = image_and_depth_to_point_cloud(img, bg_depth, fx=cam_k[0, 0], fy=cam_k[1, 1],
+                                                       cx=cam_k[0, 2], cy=cam_k[1, 2], max_depth=5.0)
+
+    obj_center, bg_near_pts = get_object_surroud_points(bg_pts, object_pts, x_expand=0.05, y_expand=0.05, z_expand=0.05)
+
+    object_pts = object_pts - obj_center
+    bg_near_pts = bg_near_pts - obj_center
+
+    object_pts = fps_pytorch_3d(object_pts, pt_num=3000)
+    bg_near_pts = fps_pytorch_3d(bg_near_pts, pt_num=1000)
+
+    # s_ply_path = os.path.join(s_root, "object.ply")
+    # save_2_ply(s_ply_path, object_pts[:, 0], object_pts[:, 1], object_pts[:, 2])
+    # exit(1)
+    # save_2_ply(s_ply_path, object_pts[:, 0], object_pts[:, 1], object_pts[:, 2], obj_colors.tolist())
+    #
+    # s_ply_path = os.path.join(s_root, "bg.ply")
+    # save_2_ply(s_ply_path, bg_pts[:, 0], bg_pts[:, 1], bg_pts[:, 2])
+    # # save_2_ply(s_ply_path, bg_pts[:, 0], bg_pts[:, 1], bg_pts[:, 2], bg_colors.tolist())
+
+    # s_ply_path = os.path.join(s_root, "bg_near.ply")
+    # save_2_ply(s_ply_path, bg_near_pts[:, 0], bg_near_pts[:, 1], bg_near_pts[:, 2])
+
+    # plt.subplot(3, 1, 1)
+    # plt.imshow(img)
+    #
+    # plt.subplot(3, 1, 2)
+    # plt.imshow(mask)
+    #
+    # plt.subplot(3, 1, 3)
+    # # plt.imshow(np.clip(depth, 0, 2))
+    # plt.imshow(object_depth)
+    #
+    # plt.show()
+    #
+    # print("fff")
+    # exit(1)
+
+
+    object_pc = torch.cat([object_pts, bg_near_pts])
+    # object_pc = object_pts
+
+    plane = torch.zeros(4)
+    plane[2] = 1
+
+    object_code = "no object code"
+
+    scale = 1.0
+
+    #  Sapien的点云的坐标系定义 x(forward), y(left), z(upward)
+    trans_matrix = np.array([[0, -1, 0], [0, 0, -1], [1, 0, 0]])
+    trans_matrix = torch.from_numpy(trans_matrix).float()
+
+    object_pc_trans = object_pc @ trans_matrix
+
+    ret_dict = {
+        "object_code": object_code,
+        # "obj_pc": object_pc,
+        "obj_pc": object_pc_trans,
+        "plane": plane,
+        "scale": scale,
+    }
+
+    return ret_dict
 
 
 def parse_args():
@@ -62,7 +219,6 @@ def get_trainer_joint(cfg, key, logger):
     trainer.resume()
     return trainer
 
-
 def get_contact_net(cfg):
     contact_cfg = compose(f"{cfg['tta']['contact_net']['type']}_config")
     with open_dict(contact_cfg):
@@ -97,38 +253,15 @@ def get_contact_net_input(data):
 
 def format_result(result, cfg, hand_model, object_model):
     result = flatten_result(result)
-    final_results = []
-    for i in trange(len(result['hand_pose'])):
-        final_results.append(eval_result(cfg['q1'], {k: result[k][i] for k in result.keys()}, hand_model, object_model, cfg['device']))
-    result.update(flatten_result(final_results))
+    # final_results = []
+    # for i in trange(len(result['hand_pose'])):
+    #     final_results.append(eval_result(cfg['q1'], {k: result[k][i] for k in result.keys()}, hand_model, object_model, cfg['device']))
+    # result.update(flatten_result(final_results))
     return result
 
 
-def get_object_input():
-    ob_table_path = "/home/pxn-lyj/Egolee/programs/UniDexGrasp_liyj/dexgrasp_generation/local_files/data/generate_dataset/DFCData/meshes/baojie/tide/pcs_table.npy"
-    object_pc = np.load(ob_table_path)
-    object_pc = torch.from_numpy(object_pc)
+def infer_unidexgrasp_realsense(cfg):
 
-    if len(object_pc.shape) > 2:
-        object_pc = object_pc[0]
-
-    plane = torch.zeros(4)
-    plane[2] = 1
-
-    object_code = "no object code"
-
-    scale = 1.0
-
-    ret_dict = {
-        "object_code": object_code,
-        "obj_pc": object_pc,
-        "plane": plane,
-        "scale": scale,
-    }
-    return ret_dict
-
-
-def main(cfg):
     cfg = process_config(cfg)
     logger = get_logger(cfg)
 
@@ -157,34 +290,33 @@ def main(cfg):
     )
 
     # object_list = get_mesh_data_object_list(root_path, 'test', scales=[0.06], n_samples=1)
-    object_list = get_mesh_data_object_list(root_path, 'test', scales=[1.0], n_samples=1)
+    # object_list = get_mesh_data_object_list(root_path, 'test', scales=[1.0], n_samples=1)
 
-    # s_root = "/home/pxn-lyj/Egolee/programs/UniDexGrasp_liyj/dexgrasp_generation/eval"
     s_root = "/home/pxn-lyj/Egolee/programs/UniDexGrasp_liyj/dexgrasp_generation/local_files/data/infer_result"
     if os.path.exists(s_root):
         shutil.rmtree(s_root)
     os.mkdir(s_root)
-
     result = []
 
-    # seeds = [233, 1024, 2048, 4096, 8192, 16392]
+    root = "/home/pxn-lyj/Egolee/programs/UniDexGrasp_liyj/dexgrasp_generation/local_files/data/dexgrasp_show_realsense_20241009"
+    img_root = os.path.join(root, "colors")
+
+    img_names = [name for name in os.listdir(img_root) if name[-4:] in [".jpg", ".png"]]
+    img_names = list(sorted(img_names, key=lambda x: int(x.split(".")[0].split("_")[0])))
+
+    cam_k_path = os.path.join(root, "cam_k.txt")
+    cam_k = np.loadtxt(cam_k_path)
+
 
     # torch.manual_seed(233)
-    torch.manual_seed(1024)
-    # torch.manual_seed(2048)
+    # torch.manual_seed(1024)
+    torch.manual_seed(2048)
 
-    for i in range(len(object_list)):
-        # if i != 0:
+    for i, img_name in enumerate(img_names):
+        # if img_name != "20_color.jpg":
         #     continue
-
-        object_data = get_object_data(object_list[i], use_table_pc_extra=False)
-        # object_data = get_object_input()
+        object_data = get_unidexgrasp_input(root, img_name, cam_k)
         batch_data = format_batch_data(object_data)
-        #
-        # for seed in seeds:
-        #     torch.manual_seed(seed)
-
-        # for j in range(8):
         for j in range(1):
             pred_dict, _ = rotation_trainer.test(batch_data)
             batch_data.update(pred_dict)
@@ -233,17 +365,16 @@ def main(cfg):
         if i > 10:
             break
 
-    # result = format_result(result, cfg, hand_model, object_model)
-    # pt_path = s_root + '/result.pt'
-    # torch.save(result, pt_path)
-
+        print("end ")
 
 
 if __name__ == "__main__":
+    print("STart")
     args = parse_args()
     initialize(version_base=None, config_path="../configs", job_name="train")
     if args.exp_dir is None:
         cfg = compose(config_name=args.config_name)
     else:
         cfg = compose(config_name=args.config_name, overrides=[f"exp_dir={args.exp_dir}"])
-    main(cfg)
+    infer_unidexgrasp_realsense(cfg)
+    print("End")
